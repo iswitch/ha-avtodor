@@ -1,0 +1,89 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Автодор",
+        "description": "Введите учётные данные личного кабинета «Автодор — Платные Дороги».",
+        "data": {
+          "username": "Логин (телефон или email)",
+          "password": "Пароль"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Повторный вход",
+        "description": "Обновите учётные данные личного кабинета Автодора.",
+        "data": {
+          "username": "Логин (телефон или email)",
+          "password": "Пароль"
+        }
+      },
+      "reconfigure": {
+        "title": "Учётные данные",
+        "data": {
+          "username": "Логин (телефон или email)",
+          "password": "Пароль"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Неверный логин или пароль. Проверьте вход в личный кабинет Автодора.",
+      "cannot_connect": "Не удалось получить данные счёта. Повторите попытку позже."
+    },
+    "abort": {
+      "already_configured": "Этот аккаунт уже настроен.",
+      "wrong_account": "Эти учётные данные относятся к другому аккаунту.",
+      "reauth_successful": "Учётные данные обновлены.",
+      "reconfigure_successful": "Учётные данные обновлены."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Обновление данных",
+        "data": {
+          "update_interval": "Интервал обновления (минуты)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {
+        "name": "Баланс"
+      },
+      "bonus_points": {
+        "name": "Бонусные баллы",
+        "unit_of_measurement": "баллов"
+      },
+      "transponder_status": {
+        "name": "Статус",
+        "state": {
+          "requested": "Затребован",
+          "produced": "Произведён",
+          "valid": "Действителен",
+          "orange_list": "В оранжевом списке",
+          "blocked": "Временно заблокирован",
+          "deleted": "Удалён",
+          "terminated": "Прекращён"
+        }
+      },
+      "interoperability": {
+        "name": "Интероперабельность",
+        "state": {
+          "not_connected": "Не подключена",
+          "connected": "Подключена",
+          "not_supported": "Невозможна"
+        }
+      },
+      "debt": {
+        "name": "Задолженность"
+      },
+      "license_plate": {
+        "name": "Госномер"
+      },
+      "violations_count": {
+        "name": "Количество нарушений"
+      }
+    }
+  }
+}

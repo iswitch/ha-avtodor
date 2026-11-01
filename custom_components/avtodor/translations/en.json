@@ -1,0 +1,89 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Avtodor",
+        "description": "Enter your Avtodor personal account credentials.",
+        "data": {
+          "username": "Login (phone number or email)",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "Update your Avtodor account credentials.",
+        "data": {
+          "username": "Login (phone number or email)",
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Account credentials",
+        "data": {
+          "username": "Login (phone number or email)",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid login or password. Check that you can sign in to the Avtodor personal account.",
+      "cannot_connect": "Cannot retrieve account data. Try again later."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "wrong_account": "These credentials belong to a different account.",
+      "reauth_successful": "Authentication updated.",
+      "reconfigure_successful": "Account credentials updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Updates",
+        "data": {
+          "update_interval": "Update interval (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {
+        "name": "Balance"
+      },
+      "bonus_points": {
+        "name": "Bonus points",
+        "unit_of_measurement": "points"
+      },
+      "transponder_status": {
+        "name": "Status",
+        "state": {
+          "requested": "Requested",
+          "produced": "Produced",
+          "valid": "Valid",
+          "orange_list": "In orange list",
+          "blocked": "Temporarily blocked",
+          "deleted": "Deleted",
+          "terminated": "Terminated"
+        }
+      },
+      "interoperability": {
+        "name": "Interoperability",
+        "state": {
+          "not_connected": "Not connected",
+          "connected": "Connected",
+          "not_supported": "Not supported"
+        }
+      },
+      "debt": {
+        "name": "Debt"
+      },
+      "license_plate": {
+        "name": "License plate"
+      },
+      "violations_count": {
+        "name": "Violations"
+      }
+    }
+  }
+}
