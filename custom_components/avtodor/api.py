@@ -64,7 +64,8 @@ class AvtodorClient:
             hass,
             cookie_jar=CookieJar(),
             timeout=ClientTimeout(total=30),
-            headers={"User-Agent": "HomeAssistant-Avtodor/1.0"},
+            # User-Agent сетевого клиента Android-приложения Автодор 2.2.4.
+            headers={"User-Agent": "okhttp/4.4.0"},
         )
 
     def close(self) -> None:
