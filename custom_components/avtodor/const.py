@@ -6,9 +6,8 @@ DEFAULT_UPDATE_INTERVAL = 5
 MIN_UPDATE_INTERVAL = 5
 MAX_UPDATE_INTERVAL = 1440
 
-CABINET_URL = "https://lk.avtodor-tr.ru/"
-API_URL = f"{CABINET_URL}api/client/extended"
-AUTH_HOST = "auth-lkmp.avtodor-tr.ru"
+API_BASE_URL = "https://lkmp.russianhighways.ru/"
+API_URL = f"{API_BASE_URL}api/client/extended"
 
 # Идентификаторы сверены со справочниками device_statuses и iop_statuses Автодора.
 DEVICE_STATUSES = {

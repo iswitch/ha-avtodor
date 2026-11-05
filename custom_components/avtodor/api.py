@@ -1,18 +1,18 @@
-"""Авторизация в личном кабинете и чтение баланса Автодора."""
+"""Авторизация и чтение данных через мобильный API Автодора."""
 
-import asyncio
 import json
 import logging
+import math
 from decimal import Decimal, InvalidOperation
-from html.parser import HTMLParser
+from time import monotonic
 from typing import Any
 
-from aiohttp import ClientError, ClientTimeout, CookieJar
+from aiohttp import ClientError, ClientTimeout, DummyCookieJar
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from yarl import URL
 
-from .const import API_URL, AUTH_HOST, CABINET_URL, DEVICE_STATUSES, IOP_STATUSES
+from .const import API_BASE_URL, API_URL, DEVICE_STATUSES, IOP_STATUSES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,43 +29,27 @@ class AvtodorConnectionError(AvtodorError):
     """Сервис недоступен или вернул некорректный ответ."""
 
 
-class LoginFormParser(HTMLParser):
-    """Извлечение формы входа Keycloak."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.action: str | None = None
-        self.fields: dict[str, str] = {}
-        self.in_form = False
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
-        if tag == "form" and attributes.get("id") == "kc-form-login":
-            self.action = attributes.get("action")
-            self.in_form = True
-        elif self.in_form and tag == "input" and attributes.get("type") == "hidden":
-            if name := attributes.get("name"):
-                self.fields[name] = attributes.get("value") or ""
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "form":
-            self.in_form = False
-
-
 class AvtodorClient:
     """Одна изолированная HTTP-сессия на аккаунт."""
 
     def __init__(self, hass: HomeAssistant, username: str, password: str) -> None:
         self._username = username
         self._password = password
-        self._authenticated = False
-        # Куки личного кабинета нельзя смешивать с общей сессией Home Assistant.
+        # Токены принадлежат одному аккаунту и не сохраняются в конфигурации или логах.
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._token_expires_at = 0.0
         self._session = async_create_clientsession(
             hass,
-            cookie_jar=CookieJar(),
+            cookie_jar=DummyCookieJar(),
             timeout=ClientTimeout(total=30),
-            # User-Agent сетевого клиента Android-приложения Автодор 2.2.4.
-            headers={"User-Agent": "okhttp/4.4.0"},
+            # Заголовки основного HTTP-клиента Android-приложения Автодор 2.2.4.
+            headers={
+                "User-Agent": "okhttp/4.4.0",
+                "X-Device": "android",
+                "Accept-Language": "ru",
+                "Accept": "application/json",
+            },
         )
 
     def close(self) -> None:
@@ -73,94 +57,106 @@ class AvtodorClient:
         self._session.detach()
 
     async def _async_request(
-        self, url: str, data: dict[str, str] | None = None
-    ) -> tuple[int, str]:
+        self,
+        url: str,
+        data: dict[str, str] | None = None,
+        access_token: str | None = None,
+    ) -> tuple[int, Any]:
         target = URL(url)
-        method = "POST" if data is not None else "GET"
-        try:
-            async with asyncio.timeout(30):
-                for _ in range(10):
-                    # В цепочке входа есть два домена. Не пересылаем сессию и пароль посторонним.
-                    if (
-                        target.scheme != "https"
-                        or target.host not in {URL(CABINET_URL).host, AUTH_HOST}
-                        or target.port != 443
-                        or target.user is not None
-                    ):
-                        raise AvtodorConnectionError(
-                            "Unexpected authentication redirect"
-                        )
-                    async with self._session.request(
-                        method, target, data=data, allow_redirects=False
-                    ) as response:
-                        if response.status in {301, 302, 303, 307, 308}:
-                            location = response.headers.get("Location")
-                            if not location:
-                                raise AvtodorConnectionError(
-                                    "Missing redirect location"
-                                )
-                            target = target.join(URL(location))
-                            if response.status == 303 or (
-                                response.status in {301, 302} and method == "POST"
-                            ):
-                                method, data = "GET", None
-                            continue
-                        if response.status not in {200, 401, 403}:
-                            raise AvtodorConnectionError(f"HTTP {response.status}")
-                        return response.status, await response.text(errors="replace")
-        except ClientError, TimeoutError, ValueError:
-            # Исключения aiohttp могут содержать URL с токеном сессии.
-            raise AvtodorConnectionError("Unable to reach Avtodor") from None
-        raise AvtodorConnectionError("Too many authentication redirects")
-
-    async def _async_login(self) -> None:
-        self._authenticated = False
-        self._session.cookie_jar.clear()
-        status, body = await self._async_request(CABINET_URL)
-        form = LoginFormParser()
-        form.feed(body)
-        if status != 200 or not form.action:
-            raise AvtodorConnectionError("Login form is unavailable")
-        action = URL(form.action)
+        # Мобильный API не требует редиректов: пароль и токены остаются на одном узле.
         if (
-            action.scheme != "https"
-            or action.host != AUTH_HOST
-            or action.port != 443
-            or action.user is not None
-            or not action.path.endswith("/login-actions/authenticate")
+            target.scheme != "https"
+            or target.host != URL(API_BASE_URL).host
+            or target.port != 443
+            or target.user is not None
         ):
-            raise AvtodorConnectionError("Unexpected login form target")
-        status, body = await self._async_request(
-            str(action),
-            {
-                **form.fields,
-                "username": self._username,
-                "password": self._password,
-                "credentialId": "",
-            },
-        )
-        form = LoginFormParser()
-        form.feed(body)
-        if status in {401, 403} or form.action:
-            raise AvtodorAuthError("Authentication failed")
-        self._authenticated = True
-
-    async def _async_get_json(self, url: str) -> Any:
-        """Прочитать API, восстановив истёкшую сессию не более одного раза."""
-        if not self._authenticated:
-            await self._async_login()
-        status, body = await self._async_request(url)
-        # Истёкшая сессия может вернуть HTML входа со статусом 200 вместо 401.
-        if status in {401, 403} or "kc-form-login" in body:
-            await self._async_login()
-            status, body = await self._async_request(url)
-        if status in {401, 403} or "kc-form-login" in body:
-            self._authenticated = False
-            raise AvtodorAuthError("Session was rejected")
+            raise AvtodorConnectionError("Unexpected API URL")
+        method = "POST" if data is not None else "GET"
+        headers = {
+            "Content-Type": (
+                "application/x-www-form-urlencoded"
+                if data is not None
+                else "application/json"
+            )
+        }
+        if access_token is not None:
+            headers["Authorization"] = f"Bearer {access_token}"
         try:
-            return json.loads(body)
+            async with self._session.request(
+                method, target, data=data, headers=headers, allow_redirects=False
+            ) as response:
+                if response.status not in {200, 400, 401, 403}:
+                    raise AvtodorConnectionError(f"HTTP {response.status}")
+                if response.status != 200:
+                    return response.status, None
+                body = await response.text(errors="replace")
+        except ClientError, TimeoutError, ValueError:
+            # Не переносим детали исключений HTTP-клиента в журнал HA.
+            raise AvtodorConnectionError("Unable to reach Avtodor") from None
+        try:
+            return 200, json.loads(body)
         except ValueError:
             raise AvtodorConnectionError("Invalid API response") from None
+
+    async def _async_authenticate(self) -> None:
+        self._access_token = None
+        if self._refresh_token:
+            status, payload = await self._async_request(
+                f"{API_BASE_URL}oauth/refresh",
+                {"refresh_token": self._refresh_token},
+            )
+            # Истёкший refresh token разрешает один обычный вход, сетевые ошибки — нет.
+            if status in {400, 401}:
+                self._refresh_token = None
+        if not self._refresh_token:
+            status, payload = await self._async_request(
+                f"{API_BASE_URL}oauth/login",
+                {"username": self._username, "password": self._password},
+            )
+        if status in {400, 401}:
+            raise AvtodorAuthError("Authentication failed")
+        if status != 200:
+            raise AvtodorConnectionError(f"HTTP {status}")
+        try:
+            access_token = payload["access_token"]
+            refresh_token = payload["refresh_token"]
+            expires_in = payload["expires_in"]
+            if (
+                not isinstance(access_token, str)
+                or not access_token
+                or not isinstance(refresh_token, str)
+                or not refresh_token
+                or payload.get("token_type", "bearer").lower() != "bearer"
+                or type(expires_in) not in {int, float}
+                or not math.isfinite(expires_in)
+                or expires_in <= 0
+            ):
+                raise ValueError
+        except KeyError, TypeError, AttributeError, ValueError, OverflowError:
+            raise AvtodorConnectionError("Invalid token response") from None
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        # Монотонное время не зависит от перевода часов; небольшой запас учитывает задержки.
+        self._token_expires_at = monotonic() + expires_in - min(30, expires_in / 10)
+
+    async def _async_get_json(self, url: str) -> Any:
+        """Прочитать API, обновив истёкший токен не более одного раза."""
+        if self._access_token is None or monotonic() >= self._token_expires_at:
+            await self._async_authenticate()
+        status, payload = await self._async_request(
+            url, access_token=self._access_token
+        )
+        if status == 401:
+            await self._async_authenticate()
+            status, payload = await self._async_request(
+                url, access_token=self._access_token
+            )
+        if status == 401:
+            self._access_token = self._refresh_token = None
+            raise AvtodorAuthError("Token was rejected")
+        if status != 200:
+            raise AvtodorConnectionError(f"HTTP {status}")
+        return payload
 
     async def async_get_data(self) -> dict[str, Any]:
         """Получить данные сенсоров, не сохраняя профиль клиента и auth_key."""
@@ -206,7 +202,7 @@ class AvtodorClient:
             try:
                 # В списке нужны также заблокированные и отключённые устройства.
                 payload = await self._async_get_json(
-                    f"{CABINET_URL}api/devices?contract_id={contract['id']}&all=true"
+                    f"{API_BASE_URL}api/devices?contract_id={contract['id']}&all=true"
                 )
                 devices = {}
                 if not isinstance(payload["devices"], list):
@@ -233,7 +229,7 @@ class AvtodorClient:
 
         vehicles = None
         try:
-            payload = await self._async_get_json(f"{CABINET_URL}api/grnzs")
+            payload = await self._async_get_json(f"{API_BASE_URL}api/grnzs")
             if not isinstance(payload, list):
                 raise ValueError
             parsed_vehicles = {}
